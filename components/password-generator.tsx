@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Copy, RefreshCw, Check, Shield } from "lucide-react"
+import { Copy, RefreshCw, Check, Shield, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Slider } from "@/components/ui/slider"
@@ -13,9 +13,10 @@ import { generatePassword, calculatePasswordStrength } from "@/lib/password-util
 
 interface PasswordGeneratorProps {
   onSelectPassword?: (password: string) => void
+  onClose?: () => void
 }
 
-export function PasswordGenerator({ onSelectPassword }: PasswordGeneratorProps) {
+export function PasswordGenerator({ onSelectPassword, onClose }: PasswordGeneratorProps) {
   const { toast } = useToast()
   const [password, setPassword] = useState("")
   const [passwordStrength, setPasswordStrength] = useState(0)
@@ -70,15 +71,20 @@ export function PasswordGenerator({ onSelectPassword }: PasswordGeneratorProps) 
   const strengthInfo = getStrengthLabel(passwordStrength)
 
   return (
-    <Card className="w-full max-w-md mx-auto">
-      <CardHeader>
+    <Card className="w-full relative">
+      {onClose && (
+        <Button variant="ghost" size="icon" className="absolute right-2 top-2" onClick={onClose} aria-label="Close">
+          <X className="h-4 w-4" />
+        </Button>
+      )}
+      <CardHeader className="pb-4 pt-6 px-6">
         <CardTitle className="flex items-center">
           <Shield className="mr-2 h-5 w-5" />
           Password Generator
         </CardTitle>
         <CardDescription>Create strong, secure passwords for your accounts</CardDescription>
       </CardHeader>
-      <CardContent className="space-y-6">
+      <CardContent className="space-y-6 px-6 pb-6">
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <Label>Generated Password</Label>
@@ -162,10 +168,17 @@ export function PasswordGenerator({ onSelectPassword }: PasswordGeneratorProps) 
         </div>
       </CardContent>
       {onSelectPassword && (
-        <CardFooter>
-          <Button className="w-full" onClick={() => onSelectPassword(password)}>
-            Use This Password
-          </Button>
+        <CardFooter className="px-6 pb-6">
+          <div className="flex w-full gap-2">
+            {onClose && (
+              <Button variant="outline" className="flex-1" onClick={onClose}>
+                Cancel
+              </Button>
+            )}
+            <Button className="flex-1" onClick={() => onSelectPassword(password)}>
+              Use This Password
+            </Button>
+          </div>
         </CardFooter>
       )}
     </Card>

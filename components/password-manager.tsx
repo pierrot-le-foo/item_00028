@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Search, Plus, MoreHorizontal, ExternalLink, Edit, Trash, Key, Eye, EyeOff, Copy, Check } from "lucide-react"
+import { Search, Plus, MoreHorizontal, ExternalLink, Edit, Trash, Key, Eye, EyeOff, Check, Copy } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -15,11 +15,25 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { Label } from "@/components/ui/label"
 import { useToast } from "@/components/ui/use-toast"
 import { PasswordGenerator } from "./password-generator"
-import { generatePassword } from "@/lib/password-utils"
+import { generatePassword, calculatePasswordStrength } from "@/lib/password-utils"
+import { Progress } from "@/components/ui/progress"
+import { zodResolver } from "@hookform/resolvers/zod"
+import { useForm } from "react-hook-form"
+import { z } from "zod"
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form"
 
 interface SavedPassword {
   id: string
@@ -31,6 +45,16 @@ interface SavedPassword {
   favicon?: string
 }
 
+// Form validation schema
+const passwordFormSchema = z.object({
+  website: z.string().min(1, { message: "Website name is required" }),
+  url: z.string().min(1, { message: "URL is required" }),
+  username: z.string().min(1, { message: "Username or email is required" }),
+  password: z.string().min(1, { message: "Password is required" }),
+})
+
+type PasswordFormValues = z.infer<typeof passwordFormSchema>
+
 export function PasswordManager() {
   const { toast } = useToast()
   const [activeTab, setActiveTab] = useState("passwords")
@@ -39,14 +63,34 @@ export function PasswordManager() {
   const [showPassword, setShowPassword] = useState<Record<string, boolean>>({})
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
+  const [passwordToDelete, setPasswordToDelete] = useState<SavedPassword | null>(null)
   const [currentPassword, setCurrentPassword] = useState<SavedPassword | null>(null)
-  const [newPassword, setNewPassword] = useState({
-    website: "",
-    url: "",
-    username: "",
-    password: "",
-  })
+  const [passwordStrength, setPasswordStrength] = useState(0)
   const [copied, setCopied] = useState<Record<string, boolean>>({})
+  const [deletedPassword, setDeletedPassword] = useState<SavedPassword | null>(null)
+
+  // Form for adding new passwords
+  const addForm = useForm<PasswordFormValues>({
+    resolver: zodResolver(passwordFormSchema),
+    defaultValues: {
+      website: "",
+      url: "",
+      username: "",
+      password: "",
+    },
+  })
+
+  // Form for editing passwords
+  const editForm = useForm<PasswordFormValues>({
+    resolver: zodResolver(passwordFormSchema),
+    defaultValues: {
+      website: "",
+      url: "",
+      username: "",
+      password: "",
+    },
+  })
 
   // Load demo passwords on initial render
   useEffect(() => {
@@ -83,33 +127,51 @@ export function PasswordManager() {
     setSavedPasswords(demoPasswords)
   }, [])
 
-  const handleAddPassword = () => {
-    if (!newPassword.website || !newPassword.username || !newPassword.password) {
-      toast({
-        variant: "destructive",
-        title: "Missing information",
-        description: "Please fill in all required fields.",
-      })
-      return
+  // Update password strength when password changes in add form
+  useEffect(() => {
+    const password = addForm.watch("password")
+    if (password) {
+      setPasswordStrength(calculatePasswordStrength(password))
+    } else {
+      setPasswordStrength(0)
     }
+  }, [addForm.watch("password")])
 
+  // Update password strength when password changes in edit form
+  useEffect(() => {
+    const password = editForm.watch("password")
+    if (password) {
+      setPasswordStrength(calculatePasswordStrength(password))
+    } else {
+      setPasswordStrength(0)
+    }
+  }, [editForm.watch("password")])
+
+  // Set edit form values when current password changes
+  useEffect(() => {
+    if (currentPassword) {
+      editForm.reset({
+        website: currentPassword.website,
+        url: currentPassword.url,
+        username: currentPassword.username,
+        password: currentPassword.password,
+      })
+    }
+  }, [currentPassword, editForm])
+
+  const handleAddPassword = (data: PasswordFormValues) => {
     const newEntry: SavedPassword = {
       id: Date.now().toString(),
-      website: newPassword.website,
-      url: newPassword.url,
-      username: newPassword.username,
-      password: newPassword.password,
+      website: data.website,
+      url: data.url,
+      username: data.username,
+      password: data.password,
       lastUsed: "Just now",
-      favicon: `https://${newPassword.url.replace(/^https?:\/\//, "").split("/")[0]}/favicon.ico`,
+      favicon: `https://${data.url.replace(/^https?:\/\//, "").split("/")[0]}/favicon.ico`,
     }
 
     setSavedPasswords([newEntry, ...savedPasswords])
-    setNewPassword({
-      website: "",
-      url: "",
-      username: "",
-      password: "",
-    })
+    addForm.reset()
     setIsAddDialogOpen(false)
 
     toast({
@@ -118,10 +180,18 @@ export function PasswordManager() {
     })
   }
 
-  const handleEditPassword = () => {
+  const handleEditPassword = (data: PasswordFormValues) => {
     if (!currentPassword) return
 
-    const updatedPasswords = savedPasswords.map((p) => (p.id === currentPassword.id ? currentPassword : p))
+    const updatedPassword = {
+      ...currentPassword,
+      website: data.website,
+      url: data.url,
+      username: data.username,
+      password: data.password,
+    }
+
+    const updatedPasswords = savedPasswords.map((p) => (p.id === currentPassword.id ? updatedPassword : p))
 
     setSavedPasswords(updatedPasswords)
     setIsEditDialogOpen(false)
@@ -129,19 +199,50 @@ export function PasswordManager() {
 
     toast({
       title: "Password updated",
-      description: `Password for ${currentPassword.website} has been updated.`,
+      description: `Password for ${data.website} has been updated.`,
     })
   }
 
-  const handleDeletePassword = (id: string) => {
-    const passwordToDelete = savedPasswords.find((p) => p.id === id)
+  const confirmDeletePassword = (password: SavedPassword) => {
+    setPasswordToDelete(password)
+    setIsDeleteDialogOpen(true)
+  }
+
+  const handleDeletePassword = () => {
     if (!passwordToDelete) return
 
-    setSavedPasswords(savedPasswords.filter((p) => p.id !== id))
+    // Store the deleted password for potential undo
+    const passwordToRestore = { ...passwordToDelete }
 
+    // Remove from the list
+    setSavedPasswords(savedPasswords.filter((p) => p.id !== passwordToDelete.id))
+
+    // Close dialog
+    setIsDeleteDialogOpen(false)
+    setPasswordToDelete(null)
+
+    // Show toast with undo option
     toast({
       title: "Password deleted",
-      description: `Password for ${passwordToDelete.website} has been deleted.`,
+      description: `Password for ${passwordToRestore.website} has been deleted.`,
+      action: (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            // Add the password back to the list
+            setSavedPasswords((prev) => [...prev, passwordToRestore])
+
+            // Show confirmation toast
+            toast({
+              title: "Password restored",
+              description: `Password for ${passwordToRestore.website} has been restored.`,
+            })
+          }}
+        >
+          Undo
+        </Button>
+      ),
     })
   }
 
@@ -168,10 +269,10 @@ export function PasswordManager() {
       symbols: true,
     })
 
-    if (isEditDialogOpen && currentPassword) {
-      setCurrentPassword({ ...currentPassword, password })
+    if (isEditDialogOpen) {
+      editForm.setValue("password", password)
     } else {
-      setNewPassword({ ...newPassword, password })
+      addForm.setValue("password", password)
     }
 
     toast({
@@ -179,6 +280,23 @@ export function PasswordManager() {
       description: "A strong password has been generated.",
     })
   }
+
+  const handlePasswordItemClick = (password: SavedPassword) => {
+    // Toggle password visibility instead of copying
+    setShowPassword((prev) => ({
+      ...prev,
+      [password.id]: !prev[password.id],
+    }))
+  }
+
+  const getStrengthLabel = (strength: number) => {
+    if (strength < 30) return { label: "Weak", color: "bg-red-500" }
+    if (strength < 60) return { label: "Moderate", color: "bg-yellow-500" }
+    if (strength < 80) return { label: "Strong", color: "bg-green-500" }
+    return { label: "Very Strong", color: "bg-green-700" }
+  }
+
+  const strengthInfo = getStrengthLabel(passwordStrength)
 
   const filteredPasswords = savedPasswords.filter(
     (p) =>
@@ -188,7 +306,7 @@ export function PasswordManager() {
   )
 
   return (
-    <div className="container mx-auto py-6 max-w-4xl">
+    <div className="container mx-auto py-6 px-4 sm:px-6 max-w-4xl">
       <header className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold flex items-center">
           <Key className="mr-2 h-6 w-6 text-primary" />
@@ -203,7 +321,7 @@ export function PasswordManager() {
         </TabsList>
 
         <TabsContent value="passwords">
-          <div className="flex justify-between items-center mb-4">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
             <div className="relative w-full max-w-sm">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
@@ -217,85 +335,126 @@ export function PasswordManager() {
 
             <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
               <DialogTrigger asChild>
-                <Button>
+                <Button className="whitespace-nowrap">
                   <Plus className="mr-2 h-4 w-4" />
                   Add Password
                 </Button>
               </DialogTrigger>
-              <DialogContent>
+              <DialogContent className="sm:max-w-md">
                 <DialogHeader>
                   <DialogTitle>Save Password</DialogTitle>
                   <DialogDescription>Add a new password to your Password Manager.</DialogDescription>
                 </DialogHeader>
 
-                <div className="space-y-4 py-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="website">Website</Label>
-                    <Input
-                      id="website"
-                      value={newPassword.website}
-                      onChange={(e) => setNewPassword({ ...newPassword, website: e.target.value })}
-                      placeholder="Google"
+                <Form {...addForm}>
+                  <form onSubmit={addForm.handleSubmit(handleAddPassword)} className="space-y-4 py-4">
+                    <FormField
+                      control={addForm.control}
+                      name="website"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Website</FormLabel>
+                          <FormControl>
+                            <Input placeholder="Google" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
                     />
-                  </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="url">URL</Label>
-                    <Input
-                      id="url"
-                      value={newPassword.url}
-                      onChange={(e) => setNewPassword({ ...newPassword, url: e.target.value })}
-                      placeholder="google.com"
+                    <FormField
+                      control={addForm.control}
+                      name="url"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>URL</FormLabel>
+                          <FormControl>
+                            <Input placeholder="google.com" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
                     />
-                  </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="username">Username or Email</Label>
-                    <Input
-                      id="username"
-                      value={newPassword.username}
-                      onChange={(e) => setNewPassword({ ...newPassword, username: e.target.value })}
-                      placeholder="user@example.com"
+                    <FormField
+                      control={addForm.control}
+                      name="username"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Username or Email</FormLabel>
+                          <FormControl>
+                            <Input placeholder="user@example.com" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
                     />
-                  </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="password">Password</Label>
-                    <div className="flex">
-                      <Input
-                        id="password"
-                        type={showPassword.new ? "text" : "password"}
-                        value={newPassword.password}
-                        onChange={(e) => setNewPassword({ ...newPassword, password: e.target.value })}
-                        className="flex-1"
-                      />
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="icon"
-                        className="ml-2"
-                        onClick={() => setShowPassword({ ...showPassword, new: !showPassword.new })}
-                      >
-                        {showPassword.new ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </Button>
-                    </div>
-                    <div className="flex justify-between mt-1">
-                      <Button variant="link" className="h-auto p-0 text-xs" onClick={() => setActiveTab("generator")}>
-                        Open password generator
-                      </Button>
-                      <Button variant="link" className="h-auto p-0 text-xs" onClick={generateNewPassword}>
-                        Generate password
-                      </Button>
-                    </div>
-                  </div>
-                </div>
+                    <FormField
+                      control={addForm.control}
+                      name="password"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Password</FormLabel>
+                          <div className="space-y-2">
+                            <div className="flex">
+                              <FormControl>
+                                <Input type={showPassword.new ? "text" : "password"} className="flex-1" {...field} />
+                              </FormControl>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="icon"
+                                className="ml-2"
+                                onClick={() => setShowPassword({ ...showPassword, new: !showPassword.new })}
+                              >
+                                {showPassword.new ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                              </Button>
+                            </div>
 
-                <DialogFooter>
-                  <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
-                    Cancel
-                  </Button>
-                  <Button onClick={handleAddPassword}>Save</Button>
-                </DialogFooter>
+                            <div className="space-y-1">
+                              <div className="flex justify-between text-xs">
+                                <span>Password Strength</span>
+                                <span>{strengthInfo.label}</span>
+                              </div>
+                              <Progress value={passwordStrength} className={strengthInfo.color} />
+                            </div>
+
+                            <div className="flex justify-between mt-1">
+                              <Button
+                                type="button"
+                                variant="link"
+                                className="h-auto p-0 text-xs"
+                                onClick={() => {
+                                  setIsAddDialogOpen(false)
+                                  setActiveTab("generator")
+                                }}
+                              >
+                                Open password generator
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="link"
+                                className="h-auto p-0 text-xs"
+                                onClick={generateNewPassword}
+                              >
+                                Generate password
+                              </Button>
+                            </div>
+                          </div>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <DialogFooter className="mt-6">
+                      <Button type="button" variant="outline" onClick={() => setIsAddDialogOpen(false)}>
+                        Cancel
+                      </Button>
+                      <Button type="submit">Save</Button>
+                    </DialogFooter>
+                  </form>
+                </Form>
               </DialogContent>
             </Dialog>
           </div>
@@ -319,7 +478,8 @@ export function PasswordManager() {
               {filteredPasswords.map((password) => (
                 <div
                   key={password.id}
-                  className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50 transition-colors"
+                  className="flex items-center justify-between p-4 rounded-lg border hover:bg-muted/50 transition-colors cursor-pointer relative"
+                  onClick={() => handlePasswordItemClick(password)}
                 >
                   <div className="flex items-center">
                     <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center mr-3 overflow-hidden">
@@ -341,6 +501,9 @@ export function PasswordManager() {
                     <div>
                       <h3 className="font-medium">{password.website}</h3>
                       <p className="text-sm text-muted-foreground">{password.username}</p>
+                      {showPassword[password.id] && (
+                        <div className="mt-1 font-mono text-sm bg-muted p-1.5 rounded">{password.password}</div>
+                      )}
                     </div>
                   </div>
 
@@ -350,28 +513,54 @@ export function PasswordManager() {
                       <Button
                         variant="ghost"
                         size="icon"
-                        onClick={() => copyToClipboard(password.password, password.id)}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setShowPassword((prev) => ({
+                            ...prev,
+                            [password.id]: !prev[password.id],
+                          }))
+                        }}
+                        title={showPassword[password.id] ? "Hide password" : "Show password"}
+                        className="relative"
+                      >
+                        {showPassword[password.id] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        {showPassword[password.id] && (
+                          <span className="absolute -bottom-1 -right-1 w-2 h-2 bg-primary rounded-full"></span>
+                        )}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          copyToClipboard(password.password, password.id)
+                        }}
                         title="Copy password"
+                        className="relative"
                       >
                         {copied[password.id] ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
                       </Button>
                       <Button
                         variant="ghost"
                         size="icon"
-                        onClick={() => window.open(`https://${password.url.replace(/^https?:\/\//, "")}`, "_blank")}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          window.open(`https://${password.url.replace(/^https?:\/\//, "")}`, "_blank")
+                        }}
                         title="Go to website"
                       >
                         <ExternalLink className="h-4 w-4" />
                       </Button>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon">
+                          <Button variant="ghost" size="icon" onClick={(e) => e.stopPropagation()}>
                             <MoreHorizontal className="h-4 w-4" />
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem
-                            onClick={() => {
+                            onClick={(e) => {
+                              e.stopPropagation()
                               setCurrentPassword(password)
                               setIsEditDialogOpen(true)
                             }}
@@ -380,7 +569,10 @@ export function PasswordManager() {
                             Edit
                           </DropdownMenuItem>
                           <DropdownMenuItem
-                            onClick={() => handleDeletePassword(password.id)}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              confirmDeletePassword(password)
+                            }}
                             className="text-destructive focus:text-destructive"
                           >
                             <Trash className="h-4 w-4 mr-2" />
@@ -390,98 +582,169 @@ export function PasswordManager() {
                       </DropdownMenu>
                     </div>
                   </div>
+
+                  {/* Hover indicator */}
+                  <div className="absolute inset-0 bg-primary/5 opacity-0 hover:opacity-100 rounded-lg pointer-events-none transition-opacity"></div>
                 </div>
               ))}
             </div>
           )}
 
+          {/* Edit Password Dialog */}
           <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
             {currentPassword && (
-              <DialogContent>
+              <DialogContent className="sm:max-w-md">
                 <DialogHeader>
                   <DialogTitle>Edit Password</DialogTitle>
                   <DialogDescription>Update your saved password details.</DialogDescription>
                 </DialogHeader>
 
-                <div className="space-y-4 py-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="edit-website">Website</Label>
-                    <Input
-                      id="edit-website"
-                      value={currentPassword.website}
-                      onChange={(e) => setCurrentPassword({ ...currentPassword, website: e.target.value })}
+                <Form {...editForm}>
+                  <form onSubmit={editForm.handleSubmit(handleEditPassword)} className="space-y-4 py-4">
+                    <FormField
+                      control={editForm.control}
+                      name="website"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Website</FormLabel>
+                          <FormControl>
+                            <Input {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
                     />
-                  </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="edit-url">URL</Label>
-                    <Input
-                      id="edit-url"
-                      value={currentPassword.url}
-                      onChange={(e) => setCurrentPassword({ ...currentPassword, url: e.target.value })}
+                    <FormField
+                      control={editForm.control}
+                      name="url"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>URL</FormLabel>
+                          <FormControl>
+                            <Input {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
                     />
-                  </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="edit-username">Username or Email</Label>
-                    <Input
-                      id="edit-username"
-                      value={currentPassword.username}
-                      onChange={(e) => setCurrentPassword({ ...currentPassword, username: e.target.value })}
+                    <FormField
+                      control={editForm.control}
+                      name="username"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Username or Email</FormLabel>
+                          <FormControl>
+                            <Input {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
                     />
-                  </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="edit-password">Password</Label>
-                    <div className="flex">
-                      <Input
-                        id="edit-password"
-                        type={showPassword[currentPassword.id] ? "text" : "password"}
-                        value={currentPassword.password}
-                        onChange={(e) => setCurrentPassword({ ...currentPassword, password: e.target.value })}
-                        className="flex-1"
-                      />
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="icon"
-                        className="ml-2"
-                        onClick={() =>
-                          setShowPassword({ ...showPassword, [currentPassword.id]: !showPassword[currentPassword.id] })
-                        }
-                      >
-                        {showPassword[currentPassword.id] ? (
-                          <EyeOff className="h-4 w-4" />
-                        ) : (
-                          <Eye className="h-4 w-4" />
-                        )}
+                    <FormField
+                      control={editForm.control}
+                      name="password"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Password</FormLabel>
+                          <div className="space-y-2">
+                            <div className="flex">
+                              <FormControl>
+                                <Input
+                                  type={showPassword[currentPassword.id] ? "text" : "password"}
+                                  className="flex-1"
+                                  {...field}
+                                />
+                              </FormControl>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="icon"
+                                className="ml-2"
+                                onClick={() =>
+                                  setShowPassword({
+                                    ...showPassword,
+                                    [currentPassword.id]: !showPassword[currentPassword.id],
+                                  })
+                                }
+                              >
+                                {showPassword[currentPassword.id] ? (
+                                  <EyeOff className="h-4 w-4" />
+                                ) : (
+                                  <Eye className="h-4 w-4" />
+                                )}
+                              </Button>
+                            </div>
+
+                            <div className="space-y-1">
+                              <div className="flex justify-between text-xs">
+                                <span>Password Strength</span>
+                                <span>{strengthInfo.label}</span>
+                              </div>
+                              <Progress value={passwordStrength} className={strengthInfo.color} />
+                            </div>
+
+                            <Button
+                              type="button"
+                              variant="link"
+                              className="h-auto p-0 text-xs mt-1"
+                              onClick={generateNewPassword}
+                            >
+                              Generate new password
+                            </Button>
+                          </div>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <DialogFooter className="mt-6">
+                      <Button type="button" variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+                        Cancel
                       </Button>
-                    </div>
-                    <Button variant="link" className="h-auto p-0 text-xs mt-1" onClick={generateNewPassword}>
-                      Generate new password
-                    </Button>
-                  </div>
-                </div>
-
-                <DialogFooter>
-                  <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
-                    Cancel
-                  </Button>
-                  <Button onClick={handleEditPassword}>Save Changes</Button>
-                </DialogFooter>
+                      <Button type="submit">Save Changes</Button>
+                    </DialogFooter>
+                  </form>
+                </Form>
               </DialogContent>
             )}
           </Dialog>
+
+          {/* Delete Confirmation Dialog */}
+          <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will delete the password for {passwordToDelete?.website}. This action cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={handleDeletePassword}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
+                  Delete
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </TabsContent>
 
         <TabsContent value="generator">
-          <PasswordGenerator
-            onSelectPassword={(password) => {
-              setNewPassword({ ...newPassword, password })
-              setActiveTab("passwords")
-              setIsAddDialogOpen(true)
-            }}
-          />
+          <div className="max-w-md mx-auto">
+            <PasswordGenerator
+              onSelectPassword={(password) => {
+                addForm.setValue("password", password)
+                setActiveTab("passwords")
+                setIsAddDialogOpen(true)
+              }}
+              onClose={() => setActiveTab("passwords")}
+            />
+          </div>
         </TabsContent>
       </Tabs>
     </div>
